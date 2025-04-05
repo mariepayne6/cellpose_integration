@@ -7,10 +7,6 @@
 # 2. Make sure your image does not have other samples in the background you do not want to quantify
 # 3. Set parameters
 
-# TO DO
-# Fill in excel output and test on mult images
-
-# Import statements - run only on setup in terminal
 # pip install cellpose, 'cellpose[gui]', "opencv-python-headless<4.3", skikit-image, matplotlib
 
 import os
@@ -24,30 +20,35 @@ from skimage.measure import regionprops, label
 import csv
 
 # ------------------ Set Params ------------------ #
-DIAMETER = int(25) #@param {type:"number"}, choosing diameter = 0 means cellpose will estimate
+DIAMETER = int(19) #@param {type:"number"}, choosing diameter = 0 means cellpose will estimate
 SEG_CHANNEL = int(2) # If the image has only one channel, leave it as 0
-model = "nuclei" #@param ["cyto", "nuclei", "cyto2", "tissuenet", "livecell"]
+model = "cyto3" #@param ["cyto", "nuclei", "cyto2", "tissuenet", "livecell"]
 channels = [0,1,3]
 # Define background thresholds for each channel (adjust these values)
-# I perform manual cell segmentation on one image to determine the thresholds & check output in range
+  # I perform manual cell segmentation on one image to determine the thresholds & check output in range
+  # Add in 5% margin of error for sensitive stains
 background_thresholds = {
-    0: 700,  # CTIP
-    1: 1000,  # TBR2
+    0: 3500,  # CTIP
+    1: 2900,  # TBR2
     2: 800,    # Hoechst
-    3: 500    # PAX6
-    # H9 1.26.25 batch 0:700, 1:1000, 2:800, 3:300
-    # XF UK5099 Jan 25 0:700, 1:1000, 2:800, 3:500
+    3: 1200    # PAX6
 }
-img_dir = "/Users/mariepayne/Desktop/jan25_uk5099_xf_layer/" 
+img_dir = "/path/to/dir/" 
 # Optional: Enter image extension here to read only files/images of specified extension (.tif,.jpg..): 
 image_format = "tif" 
 SPEED = "slow" # for mask visualization
+on = False # Set to True to visualize mask
+# Adjust based on # channels for output csv
+col_names = ["Filename", 
+          "Channel 0 Total", "Channel 0 Positive", "Channel 0 Percentage",
+          "Channel 1 Total", "Channel 1 Positive", "Channel 1 Percentage",
+          "Channel 3 Total", "Channel 3 Positive", "Channel 3 Percentage"]
 
 # ------------------ Functions ------------------ #
 # Function takes in a multichannel tiff file and returns a mask from CellPose
 # Inputs are multichannel tiff, cell diameter, model, and channel to segment
 # Outputs are segmentation masks
-def run_cellpose_masks(img, DIAMETER, SEG_CHANNEL, model, display=False): 
+def run_cellpose_masks(img, DIAMETER, SEG_CHANNEL, model, display): 
     print("Using model: ",model)
     model = models.Cellpose(model_type = model)
 
@@ -62,7 +63,7 @@ def run_cellpose_masks(img, DIAMETER, SEG_CHANNEL, model, display=False):
             img, 
             diameter=DIAMETER, 
             flow_threshold=0.4, 
-            cellprob_threshold=-2, 
+            cellprob_threshold=0, 
             channels=[0, 0])
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -124,7 +125,7 @@ def save_mask(mask, filename):
     output_mask_filename = os.path.splitext(os.path.basename(filename))[0] + "_mask.tif"
     output_mask_path = os.path.join(save_dir, output_mask_filename)
     print("Output mask saved as: ", output_mask_path)
-    imwrite(output_mask_path, mask.astype(np.uint16))
+    imwrite(output_mask_path, (mask > 0).astype(np.uint8) * 255)
 
 # Function to visualize the mask
 def visualize_mask(test_mask, stain_threshold, labeled_mask, marker, speed):
@@ -182,7 +183,7 @@ for i in range(len(imgs)): # Indexing starts at 0
   img = imgs[i]
   
   print("Running Cellpose on image %s" % files[i])
-  test_mask = run_cellpose_masks(img, DIAMETER, SEG_CHANNEL, model)
+  test_mask = run_cellpose_masks(img, DIAMETER, SEG_CHANNEL, model, display=on)
   save_mask(test_mask, files[i])
 
   # Measure Stain Counts
@@ -204,12 +205,16 @@ for i in range(len(imgs)): # Indexing starts at 0
 
       # Count positive cells
       positive_cells = sum(prop.mean_intensity > stain_threshold for prop in properties)
+      print(f"Total cells detected: {len(properties)}")
       print("For channel %d, number of positive cells: %d" % (c, positive_cells))
 
-      #visualize_mask(test_mask, stain_threshold, labeled_mask, marker, speed=SPEED)
+      # For troubleshooting
+      #for prop in properties:
+        #print(prop.mean_intensity)
 
-      print(f"Total cells detected: {len(properties)}")
-      print(f"Cells positive for stain: {positive_cells}")
+      if on:
+        visualize_mask(test_mask, stain_threshold, labeled_mask, marker, speed=SPEED)
+
       if len(properties) > 0:
         percentage = 100 * positive_cells / len(properties)
       else:
@@ -222,10 +227,8 @@ for i in range(len(imgs)): # Indexing starts at 0
 # Save the layer counts to a CSV file
 print("Writing to CSV file")
 csv_filename = os.path.join(save_dir, "layer_counts.csv")
-headers = ["Filename", 
-          "Channel 0 Total", "Channel 0 Positive", "Channel 0 Percentage",
-          "Channel 1 Total", "Channel 1 Positive", "Channel 1 Percentage",
-          "Channel 3 Total", "Channel 3 Positive", "Channel 3 Percentage"]
+headers = col_names
+
 # Write to CSV file once at the end
 with open(csv_filename, mode="w", newline="") as file:
     writer = csv.writer(file)
@@ -233,11 +236,4 @@ with open(csv_filename, mode="w", newline="") as file:
     writer.writerows(layer_counts)
 
 print(f"CSV file '{csv_filename}' saved successfully.")
-
-
-
-
-
-
-
 
